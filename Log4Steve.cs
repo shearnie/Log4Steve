@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.Reflection;
+using System.Text;
 using System.Threading.Tasks;
 
 /*
@@ -20,16 +21,24 @@ namespace Log4NetSucksToConfigure
         public string AbsolutePath { get; set; }
         public string DatePattern { get; set; }
         public int GiveUpWaitingForReleaseInMilliseconds { get; set; }
+        public int InnerDepthLimit { get; set; }
 
         public Log4Steve(string pathRelativeToAssembly = "",
                          string absolutePath = "",
                          string datePattern = "dd.MM.yyyy'.txt'",
-                         int giveUpWaitingForReleaseInMilliseconds = 3000)
+                         int giveUpWaitingForReleaseInMilliseconds = 3000,
+                         int innerDepthLimit = 10)
         {
             this.PathRelativeToAssembly = pathRelativeToAssembly;
             this.AbsolutePath = absolutePath;
             this.DatePattern = datePattern;
             this.GiveUpWaitingForReleaseInMilliseconds = giveUpWaitingForReleaseInMilliseconds;
+            this.InnerDepthLimit = innerDepthLimit;
+        }
+
+        public void Custom(string level, string message)
+        {
+            this.Log(level, message);
         }
 
         public void Info(string message)
@@ -52,6 +61,25 @@ namespace Log4NetSucksToConfigure
             this.Log("ERROR", message);
         }
 
+        public void Error(Exception ex)
+        {
+            this.Log("ERROR", ex.Message);
+            this.GetInner(ex);
+        }
+
+        public void Inner(Exception ex)
+        {
+            this.GetInner(ex);
+        }
+
+        private void GetInner(Exception ex, int currentDepth = 0)
+        {
+            if (ex.InnerException == null || currentDepth > this.InnerDepthLimit) return;
+            currentDepth++;
+            this.Log("INNER", ex.InnerException.Message);
+            this.GetInner(ex.InnerException, currentDepth);
+        }
+
         public void Fatal(string message)
         {
             this.Log("FATAL", message);
@@ -59,8 +87,11 @@ namespace Log4NetSucksToConfigure
 
         private void Log(string level, string message)
         {
-            Task.Run(() => 
-                this.Log(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + " | " + level + " | " + "- " + message));
+            var sb = new StringBuilder();
+            if (!string.IsNullOrEmpty(level))
+                sb.Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + " | " + level + " | " + "- ");
+            sb.Append(message);
+            Task.Run(() => this.Log(sb.ToString()));
         }
 
         private async Task Log(string message)
@@ -104,12 +135,14 @@ namespace Log4NetSucksToConfigure
                     catch (IOException ex)
                     {
                         // might be locked, try again
+                        var ignore = ex;
                     }
                 }
             }
             catch (Exception ex)
             {
                 // pokemon catch and be annoyingly silent like log4net
+                var ignore = ex;
             }
         }
     }
