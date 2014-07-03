@@ -17,23 +17,55 @@ namespace Log4NetSucksToConfigure
     {
         // basic rolling file logging with date as path
 
+        private string outputPath { get; set; }
         public string PathRelativeToAssembly { get; set; }
         public string AbsolutePath { get; set; }
         public string DatePattern { get; set; }
         public int GiveUpWaitingForReleaseInMilliseconds { get; set; }
-        public int InnerDepthLimit { get; set; }
+        public int ExceptionInnerDepthLimit { get; set; }
+
+        public class Destinations
+        {
+            public bool File { get; set; }
+            public bool Console { get; set; }
+        }
+        public Destinations destinations { get; set; }
 
         public Log4Steve(string pathRelativeToAssembly = "",
                          string absolutePath = "",
                          string datePattern = "dd.MM.yyyy'.txt'",
                          int giveUpWaitingForReleaseInMilliseconds = 3000,
-                         int innerDepthLimit = 10)
+                         int exceptionInnerDepthLimit = 10,
+                         bool outputToFile = true,
+                         bool outputToConsole = true)
         {
             this.PathRelativeToAssembly = pathRelativeToAssembly;
             this.AbsolutePath = absolutePath;
             this.DatePattern = datePattern;
             this.GiveUpWaitingForReleaseInMilliseconds = giveUpWaitingForReleaseInMilliseconds;
-            this.InnerDepthLimit = innerDepthLimit;
+            this.ExceptionInnerDepthLimit = exceptionInnerDepthLimit;
+            this.destinations = new Destinations(){ File = outputToFile, Console = outputToConsole };
+
+            // determine output path
+            this.outputPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+            if (string.IsNullOrEmpty(this.PathRelativeToAssembly) && string.IsNullOrEmpty(this.AbsolutePath))
+            {
+                // nothing specified just log into this assembly's location
+            }
+            else if (!string.IsNullOrEmpty(this.AbsolutePath))
+            {
+                // absolute path - first precedence
+                this.outputPath = Path.GetDirectoryName(this.AbsolutePath);
+            }
+            else if (!string.IsNullOrEmpty(this.PathRelativeToAssembly))
+            {
+                // relative path
+                this.outputPath = Path.Combine(this.outputPath, this.PathRelativeToAssembly);
+            }
+
+            // make sure directory is there
+            if (!Directory.Exists(this.outputPath))
+                Directory.CreateDirectory(this.outputPath);
         }
 
         public void Custom(string level, string message)
@@ -74,7 +106,7 @@ namespace Log4NetSucksToConfigure
 
         private void GetInner(Exception ex, int currentDepth = 0)
         {
-            if (ex.InnerException == null || currentDepth > this.InnerDepthLimit) return;
+            if (ex.InnerException == null || currentDepth > this.ExceptionInnerDepthLimit) return;
             currentDepth++;
             this.Log("INNER", ex.InnerException.Message);
             this.GetInner(ex.InnerException, currentDepth);
@@ -91,45 +123,34 @@ namespace Log4NetSucksToConfigure
             if (!string.IsNullOrEmpty(level))
                 sb.Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + " | " + level + " | " + "- ");
             sb.Append(message);
-            Task.Run(() => this.Log(sb.ToString()));
+            
+            if (this.destinations.File)
+                Task.Run(() => this.Log(sb.ToString()));
+
+            if (this.destinations.Console)
+                Console.WriteLine(sb.ToString());
         }
 
         private async Task Log(string message)
         {
-            var path = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-            if (string.IsNullOrEmpty(this.PathRelativeToAssembly) && string.IsNullOrEmpty(this.AbsolutePath))
-            {
-                // nothing specified just log into this assembly's location
-            }
-            else if (!string.IsNullOrEmpty(this.AbsolutePath))
-            {
-                // absolute path - first precedence
-                path = this.AbsolutePath;
-            }
-            else if (!string.IsNullOrEmpty(this.PathRelativeToAssembly))
-            {
-                // relative path
+            this.LogToFile(message);
+        }
 
-                path = Path.Combine(path, this.PathRelativeToAssembly);
-            }
-
-            var outputPath = Path.Combine(path, DateTime.Today.ToString(this.DatePattern));
-
+        private void LogToFile(string message)
+        {
             try
             {
-                var outputDir = Path.GetDirectoryName(outputPath);
-                if (!Directory.Exists(outputDir))
-                    Directory.CreateDirectory(outputDir);
-
                 var ok = false;
                 var start = DateTime.Now;
+                var path = Path.Combine(this.outputPath, DateTime.Today.ToString(this.DatePattern));
 
                 while (!ok && DateTime.Now < start.AddMilliseconds(GiveUpWaitingForReleaseInMilliseconds))
                 {
                     try
                     {
-                        using (var sw = new StreamWriter(outputPath, true))
+                        using (var sw = new StreamWriter(path, true))
                             sw.WriteLine(message);
+
                         ok = true;
                     }
                     catch (IOException ex)
